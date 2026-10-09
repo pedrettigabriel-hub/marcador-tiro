@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marcador de Tempo de Tiro</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0f1115; color: #e8eaed; display: flex; flex-direction: column;
+    align-items: center; min-height: 100vh; padding: 20px;
+  }
+  h1 { font-size: 1.4rem; margin: 0 0 16px; font-weight: 600; }
+  .card {
+    width: 100%; max-width: 960px; background: #181b22; border-radius: 12px;
+    padding: 16px; box-shadow: 0 4px 24px rgba(0,0,0,.4);
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+  video { width: 100%; border-radius: 8px; background: #000; display: block; }
+  button {
+    background: #2a2f3a; color: #e8eaed; border: 1px solid #3a3f4a;
+    padding: 10px 14px; border-radius: 8px; cursor: pointer;
+    font-size: 0.95rem; font-weight: 500; transition: background .15s;
+  }
+  button:hover:not(:disabled) { background: #353b48; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.start { background: #14532d; border-color: #166534; }
+  button.start:hover:not(:disabled) { background: #166534; }
+  button.end { background: #7f1d1d; border-color: #991b1b; }
+  button.end:hover:not(:disabled) { background: #991b1b; }
+  button.reset { background: #3f3f46; }
+  button.big { font-size: 1.05rem; padding: 12px 20px; flex: 1; min-width: 140px; }
+  label { font-size: .9rem; color: #a0a4ab; }
+  input[type=number], input[type=file] {
+    background: #0f1115; color: #e8eaed; border: 1px solid #3a3f4a;
+    border-radius: 6px; padding: 8px 10px; font-size: .95rem;
+  }
+  input[type=number] { width: 80px; }
+  .status { font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; }
+  .big-time { font-size: 2rem; font-weight: 700; text-align: center; padding: 12px;
+    font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; }
+  .time-row { display: flex; justify-content: space-between; padding: 8px 12px;
+    background: #0f1115; border-radius: 6px; margin: 6px 0; }
+  .time-row .label { color: #a0a4ab; }
+  .green { color: #4ade80; } .red { color: #f87171; } .yellow { color: #facc15; }
+  .hint { font-size: .85rem; color: #6b7280; margin-top: 8px; text-align: center; }
+  kbd { background:#2a2f3a; border:1px solid #3a3f4a; border-radius:4px;
+        padding:1px 6px; font-size:.8rem; font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+  <h1>🎯 Marcador de Tempo de Tiro</h1>
+
+  <div class="card">
+    <div class="row">
+      <label>Vídeo:</label>
+      <input type="file" id="fileInput" accept="video/*">
+      <label style="margin-left:auto">FPS:</label>
+      <input type="number" id="fpsInput" value="30" min="1" max="240" step="1">
+    </div>
+
+    <video id="video" playsinline></video>
+
+    <div class="row">
+      <button onclick="step(-10)">⏪ -10f</button>
+      <button onclick="step(-1)">◀ -1f</button>
+      <button onclick="togglePlay()" id="playBtn">▶ Play</button>
+      <button onclick="step(1)">▶ +1f</button>
+      <button onclick="step(10)">⏩ +10f</button>
+    </div>
+
+    <div class="time-row">
+      <span class="label">Tempo atual:</span>
+      <span class="status" id="currentTime">0.000 s</span>
+    </div>
+
+    <div class="row">
+      <button class="start big" onclick="markStart()">✅ Marcar START</button>
+      <button class="end big" onclick="markEnd()">🏁 Marcar CHEGADA</button>
+      <button class="reset" onclick="reset()">🔄</button>
+    </div>
+
+    <div class="time-row">
+      <span class="label">START:</span>
+      <span class="status green" id="startDisplay">--</span>
+    </div>
+    <div class="time-row">
+      <span class="label">CHEGADA:</span>
+      <span class="status red" id="endDisplay">--</span>
+    </div>
+
+    <div class="big-time yellow" id="totalDisplay">TEMPO: --</div>
+
+    <div class="hint">
+      Atalhos: <kbd>Espaço</kbd> play/pause · <kbd>←</kbd><kbd>→</kbd> 1 frame ·
+      <kbd>S</kbd> START · <kbd>E</kbd> CHEGADA · <kbd>R</kbd> reset
+    </div>
+  </div>
+
+<script>
+const video = document.getElementById('video');
+const fileInput = document.getElementById('fileInput');
+const fpsInput = document.getElementById('fpsInput');
+const playBtn = document.getElementById('playBtn');
+const currentTimeEl = document.getElementById('currentTime');
+const startDisplay = document.getElementById('startDisplay');
+const endDisplay = document.getElementById('endDisplay');
+const totalDisplay = document.getElementById('totalDisplay');
+
+let startTime = null;
+let endTime = null;
+
+// --- Carregar vídeo -------------------------------------------------
+fileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  video.src = URL.createObjectURL(file);
+  reset();
+});
+
+// --- Formatar tempo -------------------------------------------------
+function fmt(seconds) {
+  if (seconds === null || isNaN(seconds)) return '--';
+  const m = Math.floor(seconds / 60);
+  const s = seconds - m * 60;
+  return m > 0
+    ? `${String(m).padStart(2,'0')}:${s.toFixed(3).padStart(6,'0')}`
+    : `${s.toFixed(3)} s`;
+}
+
+// --- Navegação ------------------------------------------------------
+function fps() { return parseFloat(fpsInput.value) || 30; }
+
+function step(frames) {
+  if (!video.duration) return;
+  video.pause();
+  const delta = frames / fps();
+  video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + delta));
+}
+
+function togglePlay() {
+  if (video.paused) video.play();
+  else video.pause();
+}
+
+video.addEventListener('play',  () => playBtn.textContent = '⏸ Pause');
+video.addEventListener('pause', () => playBtn.textContent = '▶ Play');
+video.addEventListener('timeupdate', updateDisplay);
+video.addEventListener('seeked', updateDisplay);
+
+function updateDisplay() {
+  currentTimeEl.textContent = fmt(video.currentTime) + ` (f ${Math.round(video.currentTime * fps())})`;
+}
+
+// --- Marcação -------------------------------------------------------
+function markStart() {
+  startTime = video.currentTime;
+  startDisplay.textContent = fmt(startTime);
+  updateTotal();
+}
+
+function markEnd() {
+  endTime = video.currentTime;
+  endDisplay.textContent = fmt(endTime);
+  updateTotal();
+}
+
+function updateTotal() {
+  if (startTime !== null && endTime !== null) {
+    const total = endTime - startTime;
+    totalDisplay.textContent = `TEMPO: ${total.toFixed(3)} s`;
+  } else {
+    totalDisplay.textContent = 'TEMPO: --';
+  }
+}
+
+function reset() {
+  startTime = endTime = null;
+  startDisplay.textContent = '--';
+  endDisplay.textContent = '--';
+  totalDisplay.textContent = 'TEMPO: --';
+}
+
+// --- Atalhos de teclado --------------------------------------------
+document.addEventListener('keydown', (e) => {
+  // Não interferir quando o foco está num input
+  if (['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+
+  switch (e.key) {
+    case ' ': e.preventDefault(); togglePlay(); break;
+    case 'ArrowLeft':  e.preventDefault(); step(e.shiftKey ? -10 : -1); break;
+    case 'ArrowRight': e.preventDefault(); step(e.shiftKey ?  10 :  1); break;
+    case 's': case 'S': markStart(); break;
+    case 'e': case 'E': markEnd();   break;
+    case 'r': case 'R': reset();     break;
+  }
+});
+</script>
+</body>
+</html>
